@@ -1,4 +1,4 @@
-# Copyright 2024 Google LLC
+# Copyright 2025 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,17 +17,7 @@ import asyncio
 from concurrent.futures import Future
 from dataclasses import dataclass
 from threading import Thread
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Awaitable,
-    Dict,
-    List,
-    Optional,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import TYPE_CHECKING, Any, Awaitable, Mapping, Optional, TypeVar, Union
 
 import aiohttp
 import google.auth  # type: ignore
@@ -47,6 +37,8 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 USER_AGENT = "langchain-google-alloydb-pg-python/" + __version__
+
+CHECKPOINTS_TABLE = "checkpoints"
 
 
 async def _get_iam_principal_email(
@@ -76,7 +68,7 @@ async def _get_iam_principal_email(
     url = f"https://oauth2.googleapis.com/tokeninfo?access_token={credentials.token}"
     async with aiohttp.ClientSession() as client:
         response = await client.get(url, raise_for_status=True)
-        response_json: Dict = await response.json()
+        response_json: dict = await response.json()
         email = response_json.get("email")
     if email is None:
         raise ValueError(
@@ -153,6 +145,7 @@ class AlloyDBEngine:
         password: Optional[str] = None,
         ip_type: Union[str, IPTypes] = IPTypes.PUBLIC,
         iam_account_email: Optional[str] = None,
+        engine_args: Mapping = {},
     ) -> Future:
         # Running a loop in a background thread allows us to support
         # async methods from non-async environments
@@ -174,12 +167,13 @@ class AlloyDBEngine:
             loop=cls._default_loop,
             thread=cls._default_thread,
             iam_account_email=iam_account_email,
+            engine_args=engine_args,
         )
         return asyncio.run_coroutine_threadsafe(coro, cls._default_loop)
 
     @classmethod
     def from_instance(
-        cls: Type[AlloyDBEngine],
+        cls: type[AlloyDBEngine],
         project_id: str,
         region: str,
         cluster: str,
@@ -189,6 +183,7 @@ class AlloyDBEngine:
         password: Optional[str] = None,
         ip_type: Union[str, IPTypes] = IPTypes.PUBLIC,
         iam_account_email: Optional[str] = None,
+        engine_args: Mapping = {},
     ) -> AlloyDBEngine:
         """Create an AlloyDBEngine from an AlloyDB instance.
 
@@ -202,6 +197,9 @@ class AlloyDBEngine:
             password (Optional[str]): Cloud AlloyDB user password. Defaults to None.
             ip_type (Union[str, IPTypes], optional): IP address type. Defaults to IPTypes.PUBLIC.
             iam_account_email (Optional[str], optional): IAM service account email. Defaults to None.
+            engine_args (Mapping): Additional arguments that are passed directly to
+                :func:`~sqlalchemy.ext.asyncio.mymodule.MyClass.create_async_engine`. This can be
+                used to specify additional parameters to the underlying pool during it's creation.
 
         Returns:
             AlloyDBEngine: A newly created AlloyDBEngine instance.
@@ -216,12 +214,13 @@ class AlloyDBEngine:
             password,
             ip_type,
             iam_account_email=iam_account_email,
+            engine_args=engine_args,
         )
         return future.result()
 
     @classmethod
     async def _create(
-        cls: Type[AlloyDBEngine],
+        cls: type[AlloyDBEngine],
         project_id: str,
         region: str,
         cluster: str,
@@ -233,6 +232,7 @@ class AlloyDBEngine:
         loop: Optional[asyncio.AbstractEventLoop] = None,
         thread: Optional[Thread] = None,
         iam_account_email: Optional[str] = None,
+        engine_args: Mapping = {},
     ) -> AlloyDBEngine:
         """Create an AlloyDBEngine from an AlloyDB instance.
 
@@ -248,6 +248,9 @@ class AlloyDBEngine:
             loop (Optional[asyncio.AbstractEventLoop]): Async event loop used to create the engine.
             thread (Optional[Thread]): Thread used to create the engine async.
             iam_account_email (Optional[str]): IAM service account email.
+            engine_args (Mapping): Additional arguments that are passed directly to
+                :func:`~sqlalchemy.ext.asyncio.mymodule.MyClass.create_async_engine`. This can be
+                used to specify additional parameters to the underlying pool during it's creation.
 
         Raises:
             ValueError: Raises error if only one of 'user' or 'password' is specified.
@@ -300,12 +303,13 @@ class AlloyDBEngine:
         engine = create_async_engine(
             "postgresql+asyncpg://",
             async_creator=getconn,
+            **engine_args,
         )
         return cls(cls.__create_key, engine, loop, thread)
 
     @classmethod
     async def afrom_instance(
-        cls: Type[AlloyDBEngine],
+        cls: type[AlloyDBEngine],
         project_id: str,
         region: str,
         cluster: str,
@@ -315,6 +319,7 @@ class AlloyDBEngine:
         password: Optional[str] = None,
         ip_type: Union[str, IPTypes] = IPTypes.PUBLIC,
         iam_account_email: Optional[str] = None,
+        engine_args: Mapping = {},
     ) -> AlloyDBEngine:
         """Create an AlloyDBEngine from an AlloyDB instance.
 
@@ -328,6 +333,9 @@ class AlloyDBEngine:
             password (Optional[str], optional): Cloud AlloyDB user password. Defaults to None.
             ip_type (Union[str, IPTypes], optional): IP address type. Defaults to IPTypes.PUBLIC.
             iam_account_email (Optional[str], optional): IAM service account email. Defaults to None.
+            engine_args (Mapping): Additional arguments that are passed directly to
+                :func:`~sqlalchemy.ext.asyncio.mymodule.MyClass.create_async_engine`. This can be
+                used to specify additional parameters to the underlying pool during it's creation.
 
         Returns:
             AlloyDBEngine: A newly created AlloyDBEngine instance.
@@ -342,12 +350,13 @@ class AlloyDBEngine:
             password,
             ip_type,
             iam_account_email=iam_account_email,
+            engine_args=engine_args,
         )
         return await asyncio.wrap_future(future)
 
     @classmethod
     def from_engine(
-        cls: Type[AlloyDBEngine],
+        cls: type[AlloyDBEngine],
         engine: AsyncEngine,
         loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> AlloyDBEngine:
@@ -357,7 +366,7 @@ class AlloyDBEngine:
     @classmethod
     def from_engine_args(
         cls,
-        url: Union[str | URL],
+        url: str | URL,
         **kwargs: Any,
     ) -> AlloyDBEngine:
         """Create an AlloyDBEngine instance from arguments
@@ -418,7 +427,7 @@ class AlloyDBEngine:
         schema_name: str = "public",
         content_column: str = "content",
         embedding_column: str = "embedding",
-        metadata_columns: List[Column] = [],
+        metadata_columns: list[Column] = [],
         metadata_json_column: str = "langchain_metadata",
         id_column: Union[str, Column] = "langchain_id",
         overwrite_existing: bool = False,
@@ -436,7 +445,7 @@ class AlloyDBEngine:
                 Default: "page_content".
             embedding_column (str) : Name of the column to store vector embeddings.
                 Default: "embedding".
-            metadata_columns (List[Column]): A list of Columns to create for custom
+            metadata_columns (list[Column]): A list of Columns to create for custom
                 metadata. Default: []. Optional.
             metadata_json_column (str): The column to store extra metadata in JSON format.
                 Default: "langchain_metadata". Optional.
@@ -486,7 +495,7 @@ class AlloyDBEngine:
         schema_name: str = "public",
         content_column: str = "content",
         embedding_column: str = "embedding",
-        metadata_columns: List[Column] = [],
+        metadata_columns: list[Column] = [],
         metadata_json_column: str = "langchain_metadata",
         id_column: Union[str, Column] = "langchain_id",
         overwrite_existing: bool = False,
@@ -504,7 +513,7 @@ class AlloyDBEngine:
                 Default: "page_content".
             embedding_column (str) : Name of the column to store vector embeddings.
                 Default: "embedding".
-            metadata_columns (List[Column]): A list of Columns to create for custom
+            metadata_columns (list[Column]): A list of Columns to create for custom
                 metadata. Default: []. Optional.
             metadata_json_column (str): The column to store extra metadata in JSON format.
                 Default: "langchain_metadata". Optional.
@@ -536,7 +545,7 @@ class AlloyDBEngine:
         schema_name: str = "public",
         content_column: str = "content",
         embedding_column: str = "embedding",
-        metadata_columns: List[Column] = [],
+        metadata_columns: list[Column] = [],
         metadata_json_column: str = "langchain_metadata",
         id_column: Union[str, Column] = "langchain_id",
         overwrite_existing: bool = False,
@@ -554,7 +563,7 @@ class AlloyDBEngine:
                 Default: "page_content".
             embedding_column (str) : Name of the column to store vector embeddings.
                 Default: "embedding".
-            metadata_columns (List[Column]): A list of Columns to create for custom
+            metadata_columns (list[Column]): A list of Columns to create for custom
                 metadata. Default: []. Optional.
             metadata_json_column (str): The column to store extra metadata in JSON format.
                 Default: "langchain_metadata". Optional.
@@ -643,7 +652,7 @@ class AlloyDBEngine:
         table_name: str,
         schema_name: str = "public",
         content_column: str = "page_content",
-        metadata_columns: List[Column] = [],
+        metadata_columns: list[Column] = [],
         metadata_json_column: str = "langchain_metadata",
         store_metadata: bool = True,
     ) -> None:
@@ -657,7 +666,7 @@ class AlloyDBEngine:
                 Default: "public".
             content_column (str): Name of the column to store document content.
                 Default: "page_content".
-            metadata_columns (List[Column]): A list of Columns
+            metadata_columns (list[Column]): A list of Columns
                 to create for custom metadata. Optional.
             metadata_json_column (str): The column to store extra metadata in JSON format.
                 Default: "langchain_metadata". Optional.
@@ -684,7 +693,7 @@ class AlloyDBEngine:
         table_name: str,
         schema_name: str = "public",
         content_column: str = "page_content",
-        metadata_columns: List[Column] = [],
+        metadata_columns: list[Column] = [],
         metadata_json_column: str = "langchain_metadata",
         store_metadata: bool = True,
     ) -> None:
@@ -697,7 +706,7 @@ class AlloyDBEngine:
                 Default: "public".
             content_column (str): Name of the column to store document content.
                 Default: "page_content".
-            metadata_columns (List[sqlalchemy.Column]): A list of SQLAlchemy Columns
+            metadata_columns (list[sqlalchemy.Column]): A list of SQLAlchemy Columns
                 to create for custom metadata. Optional.
             metadata_json_column (str): The column to store extra metadata in JSON format.
                 Default: "langchain_metadata". Optional.
@@ -723,7 +732,7 @@ class AlloyDBEngine:
         table_name: str,
         schema_name: str = "public",
         content_column: str = "page_content",
-        metadata_columns: List[Column] = [],
+        metadata_columns: list[Column] = [],
         metadata_json_column: str = "langchain_metadata",
         store_metadata: bool = True,
     ) -> None:
@@ -736,7 +745,7 @@ class AlloyDBEngine:
                 Default: "public".
             content_column (str): Name of the column to store document content.
                 Default: "page_content".
-            metadata_columns (List[sqlalchemy.Column]): A list of SQLAlchemy Columns
+            metadata_columns (list[sqlalchemy.Column]): A list of SQLAlchemy Columns
                 to create for custom metadata. Optional.
             metadata_json_column (str): The column to store extra metadata in JSON format.
                 Default: "langchain_metadata". Optional.
@@ -756,6 +765,81 @@ class AlloyDBEngine:
                 store_metadata,
             )
         )
+
+    async def _ainit_checkpoint_table(
+        self, table_name: str = CHECKPOINTS_TABLE, schema_name: str = "public"
+    ) -> None:
+        """
+        Create AlloyDB tables to save checkpoints.
+
+        Args:
+            schema_name (str): The schema name to store the checkpoint tables.
+                Default: "public".
+
+        Returns:
+            None
+        """
+        create_checkpoints_table = f"""CREATE TABLE "{schema_name}"."{table_name}"(
+            thread_id TEXT NOT NULL,
+            checkpoint_ns TEXT NOT NULL DEFAULT '',
+            checkpoint_id TEXT NOT NULL,
+            parent_checkpoint_id TEXT,
+            type TEXT,
+            checkpoint BYTEA,
+            metadata BYTEA,
+            PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+        );"""
+
+        create_checkpoint_writes_table = f"""CREATE TABLE "{schema_name}"."{table_name + "_writes"}"(
+            thread_id TEXT NOT NULL,
+            checkpoint_ns TEXT NOT NULL DEFAULT '',
+            checkpoint_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            idx INTEGER NOT NULL,
+            channel TEXT NOT NULL,
+            type TEXT,
+            blob BYTEA NOT NULL,
+            task_path TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+        );"""
+
+        async with self._pool.connect() as conn:
+            await conn.execute(text(create_checkpoints_table))
+            await conn.execute(text(create_checkpoint_writes_table))
+            await conn.commit()
+
+    async def ainit_checkpoint_table(
+        self, table_name: str = CHECKPOINTS_TABLE, schema_name: str = "public"
+    ) -> None:
+        """Create an AlloyDB table to save checkpoint messages.
+
+        Args:
+            schema_name (str): The schema name to store checkpoint tables.
+                Default: "public".
+
+        Returns:
+            None
+        """
+        await self._run_as_async(
+            self._ainit_checkpoint_table(
+                table_name,
+                schema_name,
+            )
+        )
+
+    def init_checkpoint_table(
+        self, table_name: str = CHECKPOINTS_TABLE, schema_name: str = "public"
+    ) -> None:
+        """Create Cloud SQL tables to store checkpoints.
+
+        Args:
+            schema_name (str): The schema name to store checkpoint tables.
+                Default: "public".
+
+        Returns:
+            None
+        """
+        self._run_as_sync(self._ainit_checkpoint_table(table_name, schema_name))
 
     async def _aload_table_schema(
         self, table_name: str, schema_name: str = "public"
